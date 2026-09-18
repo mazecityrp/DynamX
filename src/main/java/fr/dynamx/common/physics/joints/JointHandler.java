@@ -53,6 +53,12 @@ public class JointHandler<A extends PhysicsEntity<?>, B extends PhysicsEntity<?>
      * @param jointId The local id of the joint, useful if you have multiple joints on this JointHandler <br> Should be unique for each joint
      */
     public boolean createJoint(PhysicsEntity<?> entity1, PhysicsEntity<?> entity2, byte jointId) {
+        if (entity1.isDead || entity2.isDead || !entity1.isAddedToWorld() || !entity2.isAddedToWorld()) {
+            // Joint creation is often delayed (scheduled tasks): the entity may have been removed in the meantime.
+            // A constraint on a body that is not in the physics world crashes the physics engine.
+            DynamXMain.log.warn("[Joint System] Cannot create joint " + getType() + " between " + entity1 + " and " + entity2 + " : one of the entities is dead or not in the world");
+            return false;
+        }
         A main = findEntity(getEntity1(), entity1, entity2);
         B attached = findEntity(getEntity2(), entity1, entity2);
         if (main == attached) {

@@ -6,6 +6,7 @@ import fr.dynamx.api.entities.modules.AttachModule;
 import fr.dynamx.api.entities.modules.IPhysicsModule;
 import fr.dynamx.api.network.EnumPacketTarget;
 import fr.dynamx.api.network.sync.SimulationHolder;
+import fr.dynamx.api.physics.IPhysicsWorld;
 import fr.dynamx.common.DynamXContext;
 import fr.dynamx.common.DynamXMain;
 import fr.dynamx.common.entities.PhysicsEntity;
@@ -338,6 +339,18 @@ public class EntityJointsHandler implements IPhysicsModule<AbstractEntityPhysics
 
     @Override
     public void onRemovedFromWorld() {
+        // Queue the removal of the physics constraints NOW, and not in the task scheduled below for a later tick:
+        // the constraints must leave the physics world in the same physics tick as the bodies of the entity, otherwise
+        // Bullet steps with constraints on removed bodies (native crash in btUnionFind::find, physics thread)
+        IPhysicsWorld physicsWorld = DynamXContext.getPhysicsWorld(entity.world);
+        if (physicsWorld != null) {
+            for (EntityJoint<?> joint : joints) {
+                if (joint.getJoint() != null) {
+                    physicsWorld.removeJoint(joint.getJoint());
+                }
+            }
+        }
+        // Then the usual clean-up (modules, simulation holders), executed in the next minecraft tick
         joints.forEach(this::onRemoveJoint);
         joints.clear();
     }

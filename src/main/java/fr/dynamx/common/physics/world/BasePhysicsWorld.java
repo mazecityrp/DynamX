@@ -28,7 +28,9 @@ import net.minecraft.world.World;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.relauncher.Side;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
@@ -107,8 +109,19 @@ public abstract class BasePhysicsWorld implements IPhysicsWorld {
                 }
                 throw e;
             }
+            List<PhysicsWorldOperation<?>> deferredOperations = null;
             while (!operations.isEmpty()) {
-                operations.remove().execute(this, dynamicsWorld, joints, entities);
+                PhysicsWorldOperation<?> operation = operations.remove();
+                operation.execute(this, dynamicsWorld, joints, entities);
+                if (operation.isDeferred()) { // Cannot be executed now (e.g. joint waiting for its bodies): retry at the next physics tick
+                    if (deferredOperations == null) {
+                        deferredOperations = new ArrayList<>();
+                    }
+                    deferredOperations.add(operation);
+                }
+            }
+            if (deferredOperations != null) {
+                operations.addAll(deferredOperations);
             }
         }
         profiler.end(Profiler.Profiles.ADD_REMOVE_BODIES);
@@ -261,11 +274,14 @@ public abstract class BasePhysicsWorld implements IPhysicsWorld {
 
     @Override
     public void clearAll() {
+        // Joints must be removed before their bodies (Bullet requirement)
+        for (PhysicsJoint jt : this.joints) {
+            if (this.dynamicsWorld.contains(jt)) {
+                this.dynamicsWorld.removeJoint(jt);
+            }
+        }
         for (PhysicsCollisionObject rb : this.dynamicsWorld.getRigidBodyList()) {
             this.dynamicsWorld.removeCollisionObject(rb);
-        }
-        for (PhysicsJoint jt : this.joints) {
-            this.dynamicsWorld.removeJoint(jt);
         }
         entities.clear();
         joints.clear();
