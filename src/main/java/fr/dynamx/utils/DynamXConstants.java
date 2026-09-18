@@ -9,6 +9,12 @@ public class DynamXConstants {
     public static final String VERSION = "4.1.0";
     public static final String VERSION_TYPE = "dev69";
     public static final String RES_DIR_NAME = "DynamX";
+    /**
+     * Side-specific content pack folders: "DxClient" on clients, "DxServer" on servers. This matches the official DynamX
+     * 4.1.0-dev69 build distributed on files.dynamx.fr (its DynamXMain uses these names), which the GitHub sources never got.
+     * RES_DIR_NAME is kept for compatibility with older code but is no longer used to load packs.
+     */
+    public static final String CLIENT_RES_DIR_NAME = "DxClient", SERVER_RES_DIR_NAME = "DxServer";
 
     public static final String ACS_GUIS_BASE_URL = "https://maven.dynamx.fr/artifactory/ACsGuisRepo/fr/aym/acsguis/ACsGuis/%1$s/ACsGuis-%1$s.jar";//"https://mps.dynamx.fr/files/4.0.0/ACsGuis/ACsGuis-%s-all.jar";
     public static final String DEFAULT_ACSGUIS_VERSION = "1.4.1-beta";

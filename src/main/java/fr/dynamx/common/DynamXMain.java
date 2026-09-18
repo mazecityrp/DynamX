@@ -93,7 +93,10 @@ public class DynamXMain {
         }
 
         //Packs init
-        resourcesDirectory = ContentPackLoader.init(event, mpsContainer, DynamXConstants.RES_DIR_NAME, event.getSide());
+        // Side-specific pack folders ("DxClient" / "DxServer"), exactly like the official 4.1.0-dev69 binary from files.dynamx.fr
+        String resDirName = event.getSide().isClient() ? DynamXConstants.CLIENT_RES_DIR_NAME : DynamXConstants.SERVER_RES_DIR_NAME;
+        log.info("Loading DynamX content packs from the '" + resDirName + "' folder");
+        resourcesDirectory = ContentPackLoader.init(event, mpsContainer, resDirName, event.getSide());
 
         bar.step("Init bullet");
         // Loading LibBullet
