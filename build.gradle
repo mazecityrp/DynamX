@@ -132,6 +132,48 @@ reobf {
 
 jar.finalizedBy('reobfJar')
 
+/**
+ * ModProtectionLib reads "security/mps_public.key" with InputStream.available() + a single read(). On a DEFLATED jar entry the
+ * read is truncated (observed: 291 of 294 bytes -> "InvalidKeyException: exponent is smaller than 3" while setting up MPS).
+ * The official DynamX builds ship this entry STORED (uncompressed): do the same, after the reobfuscation of the shadow jar.
+ */
+def storeEntriesUncompressed = { File jarFile, Collection<String> entryNames ->
+    File tmp = new File(jarFile.parentFile, jarFile.name + '.tmp')
+    java.util.zip.ZipFile zf = new java.util.zip.ZipFile(jarFile)
+    java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(new FileOutputStream(tmp))
+    try {
+        for (java.util.zip.ZipEntry e : Collections.list(zf.entries())) {
+            byte[] data = e.directory ? new byte[0] : zf.getInputStream(e).bytes
+            java.util.zip.ZipEntry ne = new java.util.zip.ZipEntry(e.name)
+            ne.time = e.time
+            if (entryNames.contains(e.name)) {
+                java.util.zip.CRC32 crc = new java.util.zip.CRC32()
+                crc.update(data)
+                ne.method = java.util.zip.ZipEntry.STORED
+                ne.size = data.length
+                ne.compressedSize = data.length
+                ne.crc = crc.value
+            }
+            zos.putNextEntry(ne)
+            zos.write(data)
+            zos.closeEntry()
+        }
+    } finally {
+        zos.close()
+        zf.close()
+    }
+    if (!jarFile.delete() || !tmp.renameTo(jarFile)) {
+        throw new GradleException("Cannot replace " + jarFile)
+    }
+}
+tasks.named('reobfShadowJar').configure {
+    doLast {
+        File out = shadowJar.archiveFile.get().asFile
+        storeEntriesUncompressed(out, ['security/mps_public.key'])
+        logger.lifecycle("Stored security/mps_public.key uncompressed in " + out.name)
+    }
+}
+
 /** Shit that idea needs to process resources ? **/
 idea {
     module {
