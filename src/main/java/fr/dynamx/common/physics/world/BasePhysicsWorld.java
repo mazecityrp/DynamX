@@ -51,6 +51,10 @@ public abstract class BasePhysicsWorld implements IPhysicsWorld {
     protected final ConcurrentLinkedQueue<PhysicsWorldOperation<?>> operations = new ConcurrentLinkedQueue<>();
 
     private final AtomicBoolean scheduledTasksLock = new AtomicBoolean();
+    /**
+     * Entities whose physics tick threw an exception on client side, see {@link #onEntityException(PhysicsEntity, String, Exception)}
+     */
+    private final Set<Integer> entitiesWithLoggedExceptions = new HashSet<>();
 
     public BasePhysicsWorld(World world, boolean isRemoteWorld) {
         this.mcWorld = world;
@@ -179,7 +183,7 @@ public abstract class BasePhysicsWorld implements IPhysicsWorld {
                 //e.getNetwork().onPrePhysicsTick(profiler);
                 e.getSynchronizer().onPrePhysicsTick(profiler);
             } catch (Exception ex) {
-                throw new PhysicsEntityException(e, "prePhysicsTick", ex);
+                onEntityException(e, "prePhysicsTick", ex);
             }
             QuaternionPool.closePool();
             Vector3fPool.closePool();
@@ -215,7 +219,7 @@ public abstract class BasePhysicsWorld implements IPhysicsWorld {
             try {
                 e.getSynchronizer().onPostPhysicsTick(profiler);
             } catch (Exception ex) {
-                throw new PhysicsEntityException(e, "postPhysicsTick", ex);
+                onEntityException(e, "postPhysicsTick", ex);
             }
             QuaternionPool.closePool();
             Vector3fPool.closePool();
@@ -229,6 +233,21 @@ public abstract class BasePhysicsWorld implements IPhysicsWorld {
         //   System.out.println("Took " + (System.currentTimeMillis() - pre) + " ms");
         MinecraftForge.EVENT_BUS.post(new PhysicsEvent.StepSimulation(this, DynamXContext.getPhysicsSimulationMode(Side.SERVER).getTimeStep()));
         profiler.end(Profiler.Profiles.BULLET_STEP_SIM);
+    }
+
+    /**
+     * On server side, rethrows the exception (unchanged behavior). <br>
+     * On client side, only skips this entity for this tick: rethrowing kills the client physics thread, which freezes every DynamX
+     * entity (and their wheels) until the player reconnects. Logged once per entity to avoid flooding the log.
+     */
+    private void onEntityException(PhysicsEntity<?> entity, String step, Exception ex) {
+        PhysicsEntityException exception = new PhysicsEntityException(entity, step, ex);
+        if (!mcWorld.isRemote) {
+            throw exception;
+        }
+        if (entitiesWithLoggedExceptions.add(entity.getEntityId())) {
+            DynamXMain.log.error("Skipping the physics tick of an entity, the physics thread keeps running", exception);
+        }
     }
 
     @Override

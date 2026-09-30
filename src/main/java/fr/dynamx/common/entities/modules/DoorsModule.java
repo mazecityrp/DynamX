@@ -43,8 +43,8 @@ import lombok.Setter;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fml.relauncher.Side;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @SynchronizedEntityVariable.SynchronizedPhysicsModule(modid = DynamXConstants.ID)
 public class DoorsModule implements IPhysicsModule<AbstractEntityPhysicsHandler<?, ?>>, AttachModule.AttachToSelfModule,
@@ -57,8 +57,12 @@ public class DoorsModule implements IPhysicsModule<AbstractEntityPhysicsHandler<
     }
 
     public final BaseVehicleEntity<?> vehicleEntity;
-    private final Map<Byte, DoorPhysics> attachedDoors = new HashMap<>();
-    private final HashMap<Byte, SynchronizedRigidBodyTransform> attachedBodiesTransform = new HashMap<>();
+    /**
+     * Concurrent maps: on client side, joints are created and destroyed in the client thread (joints sync) while the physics thread
+     * iterates them. With a HashMap, this threw a ConcurrentModificationException that killed the client physics thread.
+     */
+    private final Map<Byte, DoorPhysics> attachedDoors = new ConcurrentHashMap<>();
+    private final Map<Byte, SynchronizedRigidBodyTransform> attachedBodiesTransform = new ConcurrentHashMap<>();
 
     @SynchronizedEntityVariable(name = "door_states")
     private final EntityTransformsVariable synchronizedTransforms;
@@ -172,8 +176,9 @@ public class DoorsModule implements IPhysicsModule<AbstractEntityPhysicsHandler<
     public void preUpdatePhysics(boolean simulatingPhysics) {
         synchronizedTransforms.setChanged(true);
         if (simulatingPhysics) {
-            for (byte doorID : attachedDoors.keySet()) {
-                DoorPhysics varContainer = attachedDoors.get(doorID);
+            for (Map.Entry<Byte, DoorPhysics> entry : attachedDoors.entrySet()) {
+                byte doorID = entry.getKey();
+                DoorPhysics varContainer = entry.getValue();
                 PartDoor door = getPartDoor(doorID);
                 if (getCurrentState(doorID) == DoorState.OPENING && isDoorJointOpened(door, varContainer)) {
                     if (vehicleEntity.world.isRemote && vehicleEntity.getSynchronizer().getSimulationHolder().isPhysicsAuthority(Side.CLIENT))
@@ -191,9 +196,12 @@ public class DoorsModule implements IPhysicsModule<AbstractEntityPhysicsHandler<
     @Override
     public void postUpdatePhysics(boolean simulatingPhysics) {
         if (simulatingPhysics) {
-            for (byte door : attachedDoors.keySet()) {
-                PhysicsRigidBody body = attachedDoors.get(door).doorBody;
-                attachedBodiesTransform.get(door).getPhysicTransform().set(body);
+            for (Map.Entry<Byte, DoorPhysics> entry : attachedDoors.entrySet()) {
+                //May be null if the door is being removed by another thread
+                SynchronizedRigidBodyTransform transform = attachedBodiesTransform.get(entry.getKey());
+                if (transform != null) {
+                    transform.getPhysicTransform().set(entry.getValue().doorBody);
+                }
             }
         }
     }
@@ -270,10 +278,12 @@ public class DoorsModule implements IPhysicsModule<AbstractEntityPhysicsHandler<
 
     @Override
     public void setPhysicsTransform(byte jointId, RigidBodyTransform transform) {
-        if (attachedDoors.containsKey(jointId)) {
-            attachedBodiesTransform.get(jointId).getPhysicTransform().set(transform);
-            attachedDoors.get(jointId).doorBody.setPhysicsLocation(transform.getPosition());
-            attachedDoors.get(jointId).doorBody.setPhysicsRotation(transform.getRotation());
+        DoorPhysics door = attachedDoors.get(jointId);
+        SynchronizedRigidBodyTransform bodyTransform = attachedBodiesTransform.get(jointId);
+        if (door != null && bodyTransform != null) {
+            bodyTransform.getPhysicTransform().set(transform);
+            door.doorBody.setPhysicsLocation(transform.getPosition());
+            door.doorBody.setPhysicsRotation(transform.getRotation());
         }
     }
 

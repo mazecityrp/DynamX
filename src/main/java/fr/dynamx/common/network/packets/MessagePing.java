@@ -41,9 +41,11 @@ public class MessagePing implements IDnxPacket, net.minecraftforge.fml.common.ne
 
     @Override
     public IMessage onMessage(MessagePing message, MessageContext ctx) {
-        if (ctx.side.isServer())
-            return new MessagePing(message.sentTime, message.manual);
-        else {
+        if (ctx.side.isServer()) {
+            //Don't use reply (return) system: it sets the REPLY target on the channel shared with the server thread, which then sends
+            //its own packets with this target and crashes (NPE in FMLOutboundHandler$OutboundTarget.REPLY), kicking the next player
+            DynamXContext.getNetwork().sendToClientFromOtherThread(new MessagePing(message.sentTime, message.manual), EnumPacketTarget.PLAYER, ctx.getServerHandler().player);
+        } else {
             clientHandle(message);
         }
         return null;

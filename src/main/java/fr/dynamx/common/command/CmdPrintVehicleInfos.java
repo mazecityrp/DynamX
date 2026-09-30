@@ -1,7 +1,9 @@
 package fr.dynamx.common.command;
 
 import fr.dynamx.api.contentpack.object.IPartContainer;
+import fr.dynamx.api.physics.IPhysicsWorld;
 import fr.dynamx.client.renders.scene.node.EntityNode;
+import fr.dynamx.common.DynamXContext;
 import fr.dynamx.common.DynamXMain;
 import fr.dynamx.common.contentpack.parts.PartWheel;
 import fr.dynamx.common.contentpack.type.vehicle.ModularVehicleInfo;
@@ -56,8 +58,21 @@ public class CmdPrintVehicleInfos implements ISubCommand {
                 if (wheels.getPhysicsHandler() != null) {
                     builder.append("Phy wheels: ").append(wheels.getPhysicsHandler().getVehicleWheelData()).append("\n");
                 }
+                //Invisible wheels investigation: a NaN/infinite visual property makes the wheel render nowhere
+                boolean finiteVisuals = wheels.visualProperties != null;
+                if (finiteVisuals) {
+                    for (float value : wheels.visualProperties) {
+                        finiteVisuals &= Float.isFinite(value);
+                    }
+                }
+                builder.append(finiteVisuals ? TextFormatting.GRAY : TextFormatting.RED).append("Wheel visuals finite: ").append(finiteVisuals).append(TextFormatting.GRAY).append("\n");
+                builder.append("Wheel visuals: ").append(Arrays.toString(wheels.visualProperties)).append("\n");
             }
         }
+        IPhysicsWorld physicsWorld = DynamXContext.getPhysicsWorld(target.world);
+        Thread physicsThread = physicsWorld != null ? physicsWorld.getPhysicsThread() : null;
+        builder.append(physicsThread != null && !physicsThread.isAlive() ? TextFormatting.RED : TextFormatting.GRAY)
+                .append("Physics thread: ").append(physicsThread == null ? "none" : physicsThread.getName() + (physicsThread.isAlive() ? " alive" : " DEAD")).append(TextFormatting.GRAY).append("\n");
         if (target instanceof PackPhysicsEntity) {
             packInfo = target.getPackInfo();
             builder.append(TextFormatting.LIGHT_PURPLE).append("PackInfo: ").append(packInfo == null ? "null" : packInfo.toString()).append(" // ").append(((PackPhysicsEntity<?, ?>) target).getInfoName()).append("\n");
