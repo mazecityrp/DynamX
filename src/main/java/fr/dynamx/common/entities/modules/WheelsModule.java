@@ -1,6 +1,7 @@
 package fr.dynamx.common.entities.modules;
 
 import com.jme3.bullet.objects.VehicleWheel;
+import com.jme3.math.FastMath;
 import com.jme3.math.Vector3f;
 import fr.dynamx.api.contentpack.object.IPackInfoReloadListener;
 import fr.dynamx.api.entities.VehicleEntityProperties;
@@ -48,6 +49,11 @@ import java.util.Map;
  */
 @SynchronizedEntityVariable.SynchronizedPhysicsModule(modid = DynamXConstants.ID)
 public class WheelsModule implements IPhysicsModule<BaseWheeledVehiclePhysicsHandler<?>>, IPhysicsModule.IPhysicsUpdateListener, IPackInfoReloadListener {
+    /**
+     * Above this accumulated wheel rotation (1000 turns), the angle is wrapped to keep its float precision
+     */
+    private static final float MAX_WHEEL_ROTATION_ANGLE = 1000 * FastMath.TWO_PI;
+
     @SynchronizedEntityVariable(name = "wheel_infos")
     protected final EntityMapVariable<Map<Byte, String>, Byte, String> synchronizedWheelInfos = new EntityMapVariable<>((variable, value) -> {
         value.forEach((wheelIndex, wheelInfoName) -> {
@@ -287,16 +293,27 @@ public class WheelsModule implements IPhysicsModule<BaseWheeledVehiclePhysicsHan
         for (int i = 0; i < numWheels; i++) {
             VehicleWheel info = wheelsPhysics.getHandler().getPhysicsVehicle().getWheel(i);
             if (info.isFrontWheel()) {
-                visualProperties[VehicleEntityProperties.getPropertyIndex(i, VehicleEntityProperties.EnumVisualProperties.STEER_ANGLE)] = (float) Math.toDegrees(info.getSteerAngle());
+                visualProperties[VehicleEntityProperties.getPropertyIndex(i, VehicleEntityProperties.EnumVisualProperties.STEER_ANGLE)] = finiteOrZero((float) Math.toDegrees(info.getSteerAngle()));
             }
 
             int indexRotationAngle = VehicleEntityProperties.getPropertyIndex(i, VehicleEntityProperties.EnumVisualProperties.ROTATION_ANGLE);
+            //Bullet accumulates the wheel rotation angle: a single invalid physics tick (NaN velocity or contact) keeps it NaN forever,
+            //and the NaN visual angle (fed back in interpolateAngle) makes the wheel invisible until the entity is re-created (reconnection)
+            float rotationAngle = info.getRotationAngle();
+            if (!Float.isFinite(rotationAngle)) {
+                rotationAngle = 0;
+                info.setRotationAngle(rotationAngle);
+            } else if (Math.abs(rotationAngle) > MAX_WHEEL_ROTATION_ANGLE) {
+                //Keep the float precision of the accumulated angle, otherwise the wheel stops spinning visually
+                rotationAngle %= FastMath.TWO_PI;
+                info.setRotationAngle(rotationAngle);
+            }
             //Update prevRotation, so we have -180<prevRotationYaw-rotationYaw<180 to avoid visual glitch
-            float[] angles = DynamXMath.interpolateAngle((float) (Math.toDegrees(info.getRotationAngle()) % 360), visualProperties[indexRotationAngle], 1);
+            float[] angles = DynamXMath.interpolateAngle((float) (Math.toDegrees(rotationAngle) % 360), finiteOrZero(visualProperties[indexRotationAngle]), 1);
             prevVisualProperties[indexRotationAngle] = angles[0];
             visualProperties[indexRotationAngle] = angles[1];
 
-            visualProperties[VehicleEntityProperties.getPropertyIndex(i, VehicleEntityProperties.EnumVisualProperties.SUSPENSION_LENGTH)] = info.getSuspensionLength();
+            visualProperties[VehicleEntityProperties.getPropertyIndex(i, VehicleEntityProperties.EnumVisualProperties.SUSPENSION_LENGTH)] = finiteOrZero(info.getSuspensionLength());
             Vector3f pos = Vector3fPool.get();
             info.getCollisionLocation(pos);
             visualProperties[VehicleEntityProperties.getPropertyIndex(i, VehicleEntityProperties.EnumVisualProperties.COLLISION_X)] = pos.x;
@@ -309,6 +326,10 @@ public class WheelsModule implements IPhysicsModule<BaseWheeledVehiclePhysicsHan
                 skidInfos.set(b, w.getSkidInfo());
             }
         }
+    }
+
+    private static float finiteOrZero(float value) {
+        return Float.isFinite(value) ? value : 0;
     }
 
     public WheelsPhysicsHandler getPhysicsHandler() {
