@@ -9,9 +9,9 @@ import fr.dynamx.client.DynamXModelRegistry;
 import fr.dynamx.common.entities.PhysicsEntity;
 import fr.dynamx.common.handlers.RotatedCollisionHandlerImpl;
 import fr.dynamx.common.network.DynamXNetwork;
+import fr.dynamx.common.objloader.ExternalModels;
 import fr.dynamx.common.objloader.data.DxModelData;
 import fr.dynamx.common.objloader.data.GltfModelData;
-import fr.dynamx.common.objloader.data.ObjModelData;
 import fr.dynamx.common.physics.player.PlayerPhysicsHandler;
 import fr.dynamx.common.physics.world.PhysicsSimulationModes;
 import fr.dynamx.utils.DynamXUtils;
@@ -144,7 +144,8 @@ public class DynamXContext {
             DxModelData objModelData = null;
             switch (modelPath.getFormat()) {
                 case OBJ:
-                    objModelData = new ObjModelData(modelPath);
+                    // Reads the model from its pack, or from the external model provider (or its metadata) if it is an external model
+                    objModelData = ExternalModels.loadObjModelData(modelPath);
                     break;
                 case GLTF:
                     objModelData = new GltfModelData(modelPath);

@@ -6,6 +6,7 @@ import fr.dynamx.api.dxmodel.IModelTextureVariantsSupplier;
 import fr.dynamx.api.events.DynamXModelRenderEvent;
 import fr.dynamx.api.events.EventPhase;
 import fr.dynamx.common.DynamXContext;
+import fr.dynamx.common.objloader.data.ExternalObjModelData;
 import fr.dynamx.common.objloader.data.Material;
 import fr.dynamx.common.objloader.data.ObjModelData;
 import fr.dynamx.common.objloader.data.ObjObjectData;
@@ -64,16 +65,27 @@ public class ObjModelRenderer extends DxModelRenderer {
 
     public static ObjModelRenderer loadObjModel(DxModelPath objModelPath, @Nullable IModelTextureVariantsSupplier textureVariants) {
         try {
-            List<ObjObjectRenderer> objObjects = new ArrayList<>();
             ObjModelData objModelData = (ObjModelData) DynamXContext.getDxModelDataFromCache(objModelPath);
-            objModelData.getObjObjects().forEach(ObjObjectData -> {
-                objObjects.add(new ObjObjectRenderer(ObjObjectData));
-            });
-            return new ObjModelRenderer(objModelPath, objObjects, objModelData.getMaterials(), textureVariants);
+            if (objModelData instanceof ExternalObjModelData) {
+                // External model, not supplied yet: it is not an error, it draws nothing until it is loaded
+                return new PendingObjModelRenderer(objModelPath, objModelData.getMeshNames(), textureVariants);
+            }
+            return createObjModel(objModelPath, objModelData, textureVariants);
         } catch (Exception e) {
             DynamXErrorManager.addError(textureVariants != null ? textureVariants.getPackName() : "Non-pack model", DynamXErrorManager.MODEL_ERRORS, "obj_error", ErrorLevel.HIGH, objModelPath.getModelPath().toString(), "", e);
         }
         return null;
+    }
+
+    /**
+     * Creates the renderer of a model from its data
+     */
+    public static ObjModelRenderer createObjModel(DxModelPath objModelPath, ObjModelData objModelData, @Nullable IModelTextureVariantsSupplier textureVariants) {
+        List<ObjObjectRenderer> objObjects = new ArrayList<>();
+        objModelData.getObjObjects().forEach(ObjObjectData -> {
+            objObjects.add(new ObjObjectRenderer(ObjObjectData));
+        });
+        return new ObjModelRenderer(objModelPath, objObjects, objModelData.getMaterials(), textureVariants);
     }
 
     @Override

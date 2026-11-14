@@ -18,13 +18,17 @@ import fr.dynamx.client.renders.model.renderer.DxItemModelLoader;
 import fr.dynamx.client.renders.model.renderer.DxModelRenderer;
 import fr.dynamx.client.renders.model.renderer.GltfModelRenderer;
 import fr.dynamx.client.renders.model.renderer.ObjModelRenderer;
+import fr.dynamx.client.renders.model.renderer.PendingObjModelRenderer;
 import fr.dynamx.common.DynamXContext;
 import fr.dynamx.common.DynamXMain;
 import fr.dynamx.common.contentpack.DynamXObjectLoaders;
 import fr.dynamx.common.contentpack.loader.InfoList;
 import fr.dynamx.common.contentpack.type.objects.ArmorObject;
+import fr.dynamx.common.objloader.ExternalModels;
 import fr.dynamx.common.objloader.MTLLoader;
 import fr.dynamx.common.objloader.OBJLoader;
+import fr.dynamx.common.objloader.data.ExternalObjModelData;
+import fr.dynamx.common.objloader.data.ObjModelData;
 import fr.dynamx.utils.DynamXConstants;
 import fr.dynamx.utils.DynamXLoadingTasks;
 import fr.dynamx.utils.DynamXUtils;
@@ -34,7 +38,11 @@ import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fml.client.SplashProgress;
 import net.minecraftforge.fml.common.ProgressManager;
 
+import com.google.common.util.concurrent.ListenableFuture;
+
+import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -233,6 +241,94 @@ public class DynamXModelRegistry implements IPackInfoReloadListener {
         long t1 = System.currentTimeMillis();
         MODELS.values().forEach(DxModelRenderer::uploadVAOs);
         DynamXMain.log.info("VAO upload took " + (System.currentTimeMillis() - t1) + "ms");
+    }
+
+    /**
+     * Loads, or loads again, external models with the content supplied by the {@link fr.dynamx.api.dxmodel.IExternalModelProvider}. <br>
+     * The models are read on the calling thread (which should not be the render thread: it takes time), then their textures
+     * and geometry are sent to the graphics card on the render thread. A model that the provider does not supply is left as it is. <br>
+     * Should not be called while the packs or the models are reloading.
+     *
+     * @param models The paths of the models to load (the ones used to register them)
+     * @return A future, completed on the render thread when the models can be drawn, giving the number of loaded models
+     */
+    public ListenableFuture<Integer> loadExternalModels(Collection<ResourceLocation> models) {
+        long start = System.currentTimeMillis();
+        List<ObjModelRenderer> loaded = new ArrayList<>();
+        List<MTLLoader> mtlLoaders;
+        synchronized (OBJLoader.getMtlLoaders()) {
+            for (Map.Entry<DxModelPath, IModelTextureVariantsSupplier> entry : new ArrayList<>(MODELS_REGISTRY.entrySet())) {
+                DxModelPath path = entry.getKey();
+                if (path.getFormat() != EnumDxModelFormats.OBJ || !models.contains(path.getModelPath())) {
+                    continue;
+                }
+                InputStream content = ExternalModels.open(path);
+                if (content == null) {
+                    log.warn("External model " + path + " is not supplied by its provider");
+                    continue;
+                }
+                try {
+                    loaded.add(ObjModelRenderer.createObjModel(path, new ObjModelData(path, content), entry.getValue()));
+                } catch (Exception e) {
+                    DynamXErrorManager.addError(entry.getValue() != null ? entry.getValue().getPackName() : "Non-pack model", DynamXErrorManager.MODEL_ERRORS, "obj_error", ErrorLevel.HIGH, path.getModelPath().toString(), "", e);
+                }
+            }
+            // Reading the models has collected their material libraries
+            mtlLoaders = new ArrayList<>(OBJLoader.getMtlLoaders());
+            OBJLoader.getMtlLoaders().clear();
+        }
+        mtlLoaders.forEach(MTLLoader::loadTextures);
+        return Minecraft.getMinecraft().addScheduledTask(() -> {
+            mtlLoaders.forEach(MTLLoader::uploadTextures);
+            for (ObjModelRenderer model : loaded) {
+                DxModelRenderer previous = MODELS.put(model.getLocation().getModelPath(), model);
+                if (previous != null && previous != MISSING_MODEL) {
+                    previous.clearVAOs();
+                }
+                model.uploadVAOs();
+            }
+            // The armors keep a reference to the renderer of their model
+            DynamXObjectLoaders.ARMORS.getInfos().values().forEach(ArmorObject::initArmorModel);
+            log.info("Loaded " + loaded.size() + " external models in " + (System.currentTimeMillis() - start) + " ms");
+            return loaded.size();
+        });
+    }
+
+    /**
+     * Unloads external models: their geometry is removed from the graphics card, and they draw nothing until they are loaded again
+     * with {@link #loadExternalModels(Collection)}. A model without metadata file (a regular model) is left as it is.
+     *
+     * @param models The paths of the models to unload (the ones used to register them)
+     * @return A future, completed on the render thread when the models are unloaded, giving the number of unloaded models
+     */
+    public ListenableFuture<Integer> unloadExternalModels(Collection<ResourceLocation> models) {
+        return Minecraft.getMinecraft().addScheduledTask(() -> {
+            int unloaded = 0;
+            for (Map.Entry<DxModelPath, IModelTextureVariantsSupplier> entry : new ArrayList<>(MODELS_REGISTRY.entrySet())) {
+                DxModelPath path = entry.getKey();
+                if (path.getFormat() != EnumDxModelFormats.OBJ || !models.contains(path.getModelPath())) {
+                    continue;
+                }
+                byte[] metadata = ExternalModels.readMetadata(path);
+                if (metadata == null) {
+                    continue;
+                }
+                try {
+                    ExternalObjModelData data = new ExternalObjModelData(path, metadata);
+                    DynamXContext.getDxModelDataCache().put(path.getModelPath(), data);
+                    DxModelRenderer previous = MODELS.put(path.getModelPath(), new PendingObjModelRenderer(path, data.getMeshNames(), entry.getValue()));
+                    if (previous != null && previous != MISSING_MODEL) {
+                        previous.clearVAOs();
+                    }
+                    unloaded++;
+                } catch (Exception e) {
+                    log.error("Cannot unload the external model " + path, e);
+                }
+            }
+            DynamXObjectLoaders.ARMORS.getInfos().values().forEach(ArmorObject::initArmorModel);
+            log.info("Unloaded " + unloaded + " external models");
+            return unloaded;
+        });
     }
 
     /**

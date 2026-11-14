@@ -9,6 +9,7 @@ import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fml.common.FMLCommonHandler;
 
 import javax.annotation.Nullable;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,15 +27,34 @@ public class ObjModelData extends DxModelData {
     private final Map<String, Material> materials = new HashMap<>();
 
     public ObjModelData(DxModelPath path) {
+        this(path, null);
+    }
+
+    /**
+     * @param path     The path of the model
+     * @param supplied The content of the model file, or null to read it from the pack. The stream is closed.
+     */
+    public ObjModelData(DxModelPath path, @Nullable InputStream supplied) {
         super(path);
         try {
-            String content = new String(DynamXUtils.readInputStream(FMLCommonHandler.instance().getSide().isClient() ? getClientInputStream(path) : getServerInputStream(path)), StandardCharsets.UTF_8);
+            InputStream stream = supplied != null ? supplied : (FMLCommonHandler.instance().getSide().isClient() ? getClientInputStream(path) : getServerInputStream(path));
+            String content = new String(DynamXUtils.readInputStream(stream), StandardCharsets.UTF_8);
             ResourceLocation location = path.getModelPath();
             ResourceLocation startPath = new ResourceLocation(location.getNamespace(), location.getPath().substring(0, location.getPath().lastIndexOf("/") + 1));
             new OBJLoader(objObjects, materials).readAndLoadModel(FMLCommonHandler.instance().getSide().isClient() ? startPath : null, content);
         } catch (Exception e) {
             //Don't remove the throw - Aym
             throw new RuntimeException("Model " + path + " cannot be loaded ! " + e + " Has secure loader: " + (mpsClassLoader != null), e);
+        }
+    }
+
+    /**
+     * For the models which are not read from a file (see {@link ExternalObjModelData}): no file is read, the model has no object
+     */
+    protected ObjModelData(DxModelPath path, boolean readFile) {
+        super(path);
+        if (readFile) {
+            throw new IllegalArgumentException("Use ObjModelData(DxModelPath) to read the model file");
         }
     }
 
