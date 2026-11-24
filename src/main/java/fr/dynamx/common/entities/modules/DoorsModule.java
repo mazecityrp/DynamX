@@ -63,6 +63,11 @@ public class DoorsModule implements IPhysicsModule<AbstractEntityPhysicsHandler<
      */
     private final Map<Byte, DoorPhysics> attachedDoors = new ConcurrentHashMap<>();
     private final Map<Byte, SynchronizedRigidBodyTransform> attachedBodiesTransform = new ConcurrentHashMap<>();
+    /**
+     * Client side: animations of the doors without physics (Enabled: false), by door id. <br>
+     * Concurrent: door states are received from the network while the render thread reads them.
+     */
+    private final Map<Byte, StaticDoorAnimation> staticDoorAnimations = new ConcurrentHashMap<>();
 
     @SynchronizedEntityVariable(name = "door_states")
     private final EntityTransformsVariable synchronizedTransforms;
@@ -219,6 +224,9 @@ public class DoorsModule implements IPhysicsModule<AbstractEntityPhysicsHandler<
     public void setDoorState(byte doorId, DoorState doorState) {
         DoorPhysics doorPhysics = attachedDoors.get(doorId);
         PartDoor door = getPartDoor(doorId);
+        if (vehicleEntity.world.isRemote && door != null && !door.isEnabled()) {
+            startStaticDoorAnimation(door, doorState);
+        }
         boolean usePhysics = doorPhysics != null;
         if (usePhysics)
             vehicleEntity.forcePhysicsActivation();
@@ -246,6 +254,45 @@ public class DoorsModule implements IPhysicsModule<AbstractEntityPhysicsHandler<
                     doorPhysics.setJointLimit(door.getAxisToUse(), door.getCloseLimit().x, door.getCloseLimit().y);
                 }
                 break;
+        }
+    }
+
+    /**
+     * Client side: starts the opening/closing animation of a door without physics (Enabled: false). <br>
+     * The animation starts from the current opening, so a door closed while opening goes back smoothly.
+     * A state received with the entity (first ticks) is applied at once: a player arriving near an
+     * opened door must not see it open.
+     */
+    private void startStaticDoorAnimation(PartDoor door, DoorState newState) {
+        boolean opening = newState == DoorState.OPENED || newState == DoorState.OPENING;
+        float from = vehicleEntity.ticksExisted < 10 ? (opening ? 1 : 0) : getStaticDoorOpening(door, 0);
+        staticDoorAnimations.put(door.getId(), new StaticDoorAnimation(from, opening, vehicleEntity.world.getTotalWorldTime()));
+    }
+
+    /**
+     * Client side: opening of a door without physics (Enabled: false), from 0 (closed) to 1 (opened),
+     * animated over {@link PartDoor#getDoorCloseTime()} ticks.
+     *
+     * @param partialTicks the render partial ticks
+     */
+    public float getStaticDoorOpening(PartDoor door, float partialTicks) {
+        StaticDoorAnimation anim = staticDoorAnimations.get(door.getId());
+        if (anim == null) {
+            return isDoorOpened(door.getId()) ? 1 : 0;
+        }
+        float step = (vehicleEntity.world.getTotalWorldTime() - anim.startTick + partialTicks) / Math.max(1, door.getDoorCloseTime());
+        return anim.opening ? Math.min(1, anim.from + step) : Math.max(0, anim.from - step);
+    }
+
+    private static final class StaticDoorAnimation {
+        private final float from;
+        private final boolean opening;
+        private final long startTick;
+
+        private StaticDoorAnimation(float from, boolean opening, long startTick) {
+            this.from = from;
+            this.opening = opening;
+            this.startTick = startTick;
         }
     }
 

@@ -178,6 +178,15 @@ public class PartDoor extends InteractivePart<BaseVehicleEntity<?>, ModularVehic
         Vector3fPool.closePool();
     }
 
+    /**
+     * The opened position of a door without physics : the extreme value of {@code OpenedDoorAngleLimit},
+     * as for the joint of a physical door (radians for a rotation axis, blocks for a translation axis).
+     */
+    public float getStaticOpenLimit() {
+        float lower = getOpenLimit().x, upper = getOpenLimit().y;
+        return lower >= 0 && upper >= 0 ? Math.max(lower, upper) : Math.min(lower, upper);
+    }
+
     @Nullable
     public PartEntitySeat getLinkedSeat(BaseVehicleEntity<?> vehicleEntity) {
         return vehicleEntity.getPackInfo().getPartsByType(PartEntitySeat.class).stream()
@@ -374,6 +383,9 @@ public class PartDoor extends InteractivePart<BaseVehicleEntity<?>, ModularVehic
             ModularPhysicsEntity<?> entity = context.getEntity();
             DoorsModule module = entity != null ? entity.getModuleByType(DoorsModule.class) : null;
             if (!isEnabled() || module == null || module.getCurrentState(getId()) == DoorsModule.DoorState.CLOSED) {
+                if (!isEnabled() && module != null) {
+                    applyStaticDoorOpening(module.getStaticDoorOpening(PartDoor.this, context.getPartialTicks()));
+                }
                 Vector3f pos = Vector3fPool.get().addLocal(translation);
                 pos.subtract(getDoorAttachPoint(), pos);
                 transform.translate(pos.x, pos.y, pos.z);
@@ -397,6 +409,43 @@ public class PartDoor extends InteractivePart<BaseVehicleEntity<?>, ModularVehic
             context.getRender().renderModelGroup(context.getModel(), getObjectName(), entity, context.getTextureId(), false);
             GlStateManager.popMatrix();
             renderChildren(context, packInfo, transform);
+        }
+
+        /**
+         * Moves a door without physics (Enabled: false) towards its opened position, around (or along) its
+         * {@code Axis}, from the {@code LocalCarAttachPoint} : rotations in radians, translations in blocks,
+         * up to the {@code OpenedDoorAngleLimit}.
+         *
+         * @param opening 0 = closed, 1 = opened
+         */
+        private void applyStaticDoorOpening(float opening) {
+            if (opening <= 0) {
+                return;
+            }
+            float eased = opening * opening * (3 - 2 * opening);
+            float amount = getStaticOpenLimit() * eased;
+            Vector3f hinge = getCarAttachPoint();
+            switch (getAxisToUse()) {
+                case X:
+                    transform.translate(amount, 0, 0);
+                    return;
+                case Y:
+                    transform.translate(0, amount, 0);
+                    return;
+                case Z:
+                    transform.translate(0, 0, amount);
+                    return;
+                default:
+                    transform.translate(hinge.x, hinge.y, hinge.z);
+                    if (getAxisToUse() == DynamXPhysicsHelper.EnumPhysicsAxis.X_ROT) {
+                        transform.rotate(amount, 1, 0, 0);
+                    } else if (getAxisToUse() == DynamXPhysicsHelper.EnumPhysicsAxis.Y_ROT) {
+                        transform.rotate(amount, 0, 1, 0);
+                    } else {
+                        transform.rotate(amount, 0, 0, 1);
+                    }
+                    transform.translate(-hinge.x, -hinge.y, -hinge.z);
+            }
         }
 
         @Override
