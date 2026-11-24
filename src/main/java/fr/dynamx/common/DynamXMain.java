@@ -176,6 +176,11 @@ public class DynamXMain {
         NetworkRegistry.INSTANCE.registerGuiHandler(instance, new DynamXGuiHandler());
 
         CapabilityManager.INSTANCE.register(DynamXChunkData.class, new DynamXChunkDataStorage(), DynamXChunkData::new);
+        // Vehicles are stored in the chunk of their origin, but can reach far beyond it (an 18 m semi-trailer
+        // reaches 8.5 m behind its origin). The player's mouse over (and every getEntitiesWithinAABB) only
+        // looks MAX_ENTITY_RADIUS blocks around the searched box: with the vanilla 2 blocks, the rear doors of
+        // a long trailer parked near a chunk border cannot be targeted.
+        net.minecraft.world.World.MAX_ENTITY_RADIUS = Math.max(net.minecraft.world.World.MAX_ENTITY_RADIUS, 10.0D);
     }
 
     @EventHandler
